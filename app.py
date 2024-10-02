@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import requests
 import json
@@ -83,6 +81,8 @@ def create_csv(tickets):
         labels = ticket.get('labels', [])
         labels = [label.get('name', '') if isinstance(label, dict) else label for label in labels]
         context_text = safe_get(ticket, ['content', 'text'], default='')
+        
+        # Extract assigned agent name, handle if the field is missing
         assigned_agent_name = safe_get(ticket, ['current_user_assignee', 'name'], default='Unassigned')
 
         # Parse ticket creation time
@@ -102,7 +102,7 @@ def create_csv(tickets):
             reply_created_at_str = reply.get('created_at', '')
             reply_created_at = parser.parse(reply_created_at_str) if reply_created_at_str else None
 
-            reply_type = 'agent' if reply.get('agent_responder') else 'customer'
+            reply_type = 'agent' if reply.get('agent') else 'customer'  # Corrected to use 'agent' field
             if reply_type == 'agent':
                 key = f'agent_{agent_reply_count}'
                 agent_reply_count += 1
@@ -112,9 +112,10 @@ def create_csv(tickets):
 
             replies[key] = safe_get(reply, ['content', 'text'], default='')
 
+            # Calculate response times
             if reply_created_at and previous_message_time:
                 time_diff = (reply_created_at - previous_message_time).total_seconds() / 3600
-                if reply.get('agent_responder'):
+                if reply.get('agent'):  # Check if it's an agent reply
                     response_times.append(time_diff)
                     if not first_agent_reply_time:
                         first_agent_reply_time = reply_created_at
@@ -141,7 +142,7 @@ def create_csv(tickets):
             'assigned_agent_name': assigned_agent_name,
             'first_response_time': first_response_time,
             'average_response_time': average_response_time,
-            **replies
+            **replies  # This handles all replies dynamically
         }
         writer.writerow(row_data)
     return output.getvalue()
