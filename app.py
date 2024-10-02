@@ -6,6 +6,7 @@ import json
 import csv
 from datetime import datetime, timedelta
 import os
+from dateutil import parser
 
 # Replace these with your own values or set them as environment variables
 SUBDOMAIN = os.getenv("SUPPORTBEE_SUBDOMAIN", "YOUR_SUBDOMAIN")
@@ -33,6 +34,9 @@ def fetch_all_tickets(start_date, end_date):
             f"&sort_by=last_activity"
         )
         response = requests.get(url, headers=HEADERS)
+        if response.status_code != 200:
+            st.error(f"Error fetching tickets: {response.status_code}")
+            break
         data = response.json()
         tickets = data.get("tickets", [])
         if not tickets:
@@ -44,6 +48,9 @@ def fetch_all_tickets(start_date, end_date):
 def fetch_replies(ticket_id):
     url = f"{BASE_URL}/tickets/{ticket_id}/replies?auth_token={API_TOKEN}"
     response = requests.get(url, headers=HEADERS)
+    if response.status_code != 200:
+        st.error(f"Error fetching replies for ticket {ticket_id}: {response.status_code}")
+        return []
     return response.json().get("replies", [])
 
 def safe_get(dictionary, keys, default=''):
@@ -55,10 +62,12 @@ def safe_get(dictionary, keys, default=''):
     return dictionary if dictionary != {} else default
 
 def create_csv(tickets):
-    # Create CSV in memory
     import io
     output = io.StringIO()
-    fieldnames = ['ticket_id', 'date', 'labels', 'ticket_description']
+    fieldnames = [
+        'ticket_id', 'date', 'labels', 'ticket_description',
+        'assigned_agent_name', 'first_response_time', 'average_response_time'
+    ]
     for i in range(0, 60):
         fieldnames += [f'agent_{i}', f'customer_{i}']
     writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -71,15 +80,57 @@ def create_csv(tickets):
             date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ').strftime('%m-%d-%Y')
         else:
             date = ''
-        labels = [label.get('name', '') for label in ticket.get('labels', [])]
-        context_text = safe_get(ticket, ['content', 'text'])
+        labels = ticket.get('labels', [])
+        labels = [label.get('name', '') if isinstance(label, dict) else label for label in labels]
+        context_text = safe_get(ticket, ['content', 'text'], default='')
+        assigned_agent_name = safe_get(ticket, ['current_user_assignee', 'name'], default='Unassigned')
+
+        # Parse ticket creation time
+        ticket_created_at_str = ticket.get('created_at', '')
+        ticket_created_at = parser.parse(ticket_created_at_str) if ticket_created_at_str else None
+
+        first_agent_reply_time = None
+        response_times = []
+        previous_message_time = ticket_created_at
 
         # Extract replies
         replies = {}
-        for i, reply in enumerate(ticket.get('replies', []), start=0):
+        agent_reply_count = 0
+        customer_reply_count = 0
+
+        for reply in sorted(ticket.get('replies', []), key=lambda x: x.get('created_at', '')):
+            reply_created_at_str = reply.get('created_at', '')
+            reply_created_at = parser.parse(reply_created_at_str) if reply_created_at_str else None
+
             reply_type = 'agent' if reply.get('agent_responder') else 'customer'
-            key = f'{reply_type}_{i // 2}'
-            replies[key] = safe_get(reply, ['content', 'text'])
+            if reply_type == 'agent':
+                key = f'agent_{agent_reply_count}'
+                agent_reply_count += 1
+            else:
+                key = f'customer_{customer_reply_count}'
+                customer_reply_count += 1
+
+            replies[key] = safe_get(reply, ['content', 'text'], default='')
+
+            if reply_created_at and previous_message_time:
+                time_diff = (reply_created_at - previous_message_time).total_seconds() / 3600
+                if reply.get('agent_responder'):
+                    response_times.append(time_diff)
+                    if not first_agent_reply_time:
+                        first_agent_reply_time = reply_created_at
+                previous_message_time = reply_created_at
+
+        # Calculate first response time
+        if ticket_created_at and first_agent_reply_time:
+            first_response_time = (first_agent_reply_time - ticket_created_at).total_seconds() / 3600
+        else:
+            first_response_time = None
+
+        # Calculate average response time
+        if response_times:
+            average_response_time = sum(response_times) / len(response_times)
+        else:
+            average_response_time = None
 
         # Write to CSV
         row_data = {
@@ -87,6 +138,9 @@ def create_csv(tickets):
             'date': date,
             'labels': ', '.join(labels),
             'ticket_description': context_text,
+            'assigned_agent_name': assigned_agent_name,
+            'first_response_time': first_response_time,
+            'average_response_time': average_response_time,
             **replies
         }
         writer.writerow(row_data)
