@@ -32,11 +32,17 @@ def fetch_all_tickets(start_date, end_date):
             f"&sort_by=last_activity"
         )
         response = requests.get(url, headers=HEADERS)
+        
+        # Check if the request is successful
         if response.status_code != 200:
             st.error(f"Error fetching tickets: {response.status_code}")
+            st.write(response.text)  # Log the response body for debugging
             break
+        
         data = response.json()
         tickets = data.get("tickets", [])
+        st.write(f"Page {page} response:", data)  # Log full response for each page
+        
         if not tickets:
             break
         all_tickets.extend(tickets)
@@ -46,10 +52,16 @@ def fetch_all_tickets(start_date, end_date):
 def fetch_replies(ticket_id):
     url = f"{BASE_URL}/tickets/{ticket_id}/replies?auth_token={API_TOKEN}"
     response = requests.get(url, headers=HEADERS)
+    
+    # Log replies to ensure the data is being returned correctly
     if response.status_code != 200:
         st.error(f"Error fetching replies for ticket {ticket_id}: {response.status_code}")
+        st.write(response.text)  # Log the response body for debugging
         return []
+    
+    st.write(f"Replies for ticket {ticket_id}: ", response.json())  # Log the replies for each ticket
     return response.json().get("replies", [])
+
 
 def safe_get(dictionary, keys, default=''):
     for key in keys:
@@ -98,11 +110,18 @@ def create_csv(tickets):
         agent_reply_count = 0
         customer_reply_count = 0
 
+
         for reply in sorted(ticket.get('replies', []), key=lambda x: x.get('created_at', '')):
             reply_created_at_str = reply.get('created_at', '')
             reply_created_at = parser.parse(reply_created_at_str) if reply_created_at_str else None
+        
+            # Check for 'agent' field
+            if 'agent' not in reply:
+                st.warning(f"No agent found in reply: {reply}")  # Log the reply if the field is missing
+        
+            reply_type = 'agent' if reply.get('agent') else 'customer'
 
-            reply_type = 'agent' if reply.get('agent') else 'customer'  # Corrected to use 'agent' field
+            
             if reply_type == 'agent':
                 key = f'agent_{agent_reply_count}'
                 agent_reply_count += 1
@@ -151,12 +170,16 @@ def main():
     st.title("Support Ticket Downloader")
 
     # Date input
+
+
+    
     start_date = st.date_input("Start Date", datetime.now() - timedelta(days=30))
     end_date = st.date_input("End Date", datetime.now())
 
     # Convert dates to the required format
     start_date_str = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
     end_date_str = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    st.write(f"Start date: {start_date_str}, End date: {end_date_str}")  # Log the date values
 
     if st.button("Fetch and Download Tickets"):
         with st.spinner("Fetching tickets..."):
