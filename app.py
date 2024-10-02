@@ -74,97 +74,86 @@ def safe_get(dictionary, keys, default=''):
 def create_csv(tickets):
     import io
     output = io.StringIO()
+    
+    # Defining the fixed column headers
     fieldnames = [
         'ticket_id', 'date', 'labels', 'ticket_description',
         'assigned_agent_name', 'first_response_time', 'average_response_time'
     ]
-    for i in range(0, 60):
-        fieldnames += [f'agent_{i}', f'customer_{i}']
+    
+    # Dynamically add reply columns based on the maximum number of replies
+    max_replies = max(len(ticket.get('replies', [])) for ticket in tickets)
+    for i in range(max_replies):
+        fieldnames.append(f'agent_{i}')
+        fieldnames.append(f'customer_{i}')
+    
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
 
     for ticket in tickets:
         ticket_id = ticket.get('id', '')
         date_str = ticket.get('last_activity_at', '')
-        if date_str:
-            date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ').strftime('%m-%d-%Y')
-        else:
-            date = ''
-        labels = ticket.get('labels', [])
-        labels = [label.get('name', '') if isinstance(label, dict) else label for label in labels]
-        context_text = safe_get(ticket, ['content', 'text'], default='')
+        date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ').strftime('%m-%d-%Y') if date_str else ''
         
-        # Extract assigned agent name, handle if the field is missing
+        labels = [label.get('name', '') for label in ticket.get('labels', [])]
+        ticket_description = safe_get(ticket, ['content', 'text'], default='')
+
+        # Extract assigned agent name
         assigned_agent_name = safe_get(ticket, ['current_user_assignee', 'name'], default='Unassigned')
 
-        # Parse ticket creation time
+        # Calculate response times based on replies
         ticket_created_at_str = ticket.get('created_at', '')
         ticket_created_at = parser.parse(ticket_created_at_str) if ticket_created_at_str else None
-
+        
         first_agent_reply_time = None
         response_times = []
         previous_message_time = ticket_created_at
 
-        # Extract replies
-        replies = {}
+        replies = ticket.get('replies', [])
         agent_reply_count = 0
         customer_reply_count = 0
 
+        row_data = {
+            'ticket_id': ticket_id,
+            'date': date,
+            'labels': ', '.join(labels),
+            'ticket_description': ticket_description,
+            'assigned_agent_name': assigned_agent_name,
+        }
 
-        for reply in sorted(ticket.get('replies', []), key=lambda x: x.get('created_at', '')):
+        # Loop through replies and assign to the appropriate agent/customer fields
+        for i, reply in enumerate(sorted(replies, key=lambda x: x.get('created_at', ''))):
             reply_created_at_str = reply.get('created_at', '')
             reply_created_at = parser.parse(reply_created_at_str) if reply_created_at_str else None
-        
-            # Check for 'agent' field
-            if 'agent' not in reply:
-                st.warning(f"No agent found in reply: {reply}")  # Log the reply if the field is missing
-        
-            reply_type = 'agent' if reply.get('agent') else 'customer'
 
-            
-            if reply_type == 'agent':
-                key = f'agent_{agent_reply_count}'
+            # Check if it's an agent or customer reply
+            if reply.get('agent'):
+                row_data[f'agent_{agent_reply_count}'] = safe_get(reply, ['content', 'text'], default='')
                 agent_reply_count += 1
             else:
-                key = f'customer_{customer_reply_count}'
+                row_data[f'customer_{customer_reply_count}'] = safe_get(reply, ['content', 'text'], default='')
                 customer_reply_count += 1
 
-            replies[key] = safe_get(reply, ['content', 'text'], default='')
-
-            # Calculate response times
+            # Calculate response time for agents
             if reply_created_at and previous_message_time:
                 time_diff = (reply_created_at - previous_message_time).total_seconds() / 3600
-                if reply.get('agent'):  # Check if it's an agent reply
+                if reply.get('agent'):
                     response_times.append(time_diff)
                     if not first_agent_reply_time:
                         first_agent_reply_time = reply_created_at
                 previous_message_time = reply_created_at
 
-        # Calculate first response time
-        if ticket_created_at and first_agent_reply_time:
-            first_response_time = (first_agent_reply_time - ticket_created_at).total_seconds() / 3600
-        else:
-            first_response_time = None
+        # Calculate first and average response times
+        first_response_time = (first_agent_reply_time - ticket_created_at).total_seconds() / 3600 if ticket_created_at and first_agent_reply_time else None
+        average_response_time = sum(response_times) / len(response_times) if response_times else None
 
-        # Calculate average response time
-        if response_times:
-            average_response_time = sum(response_times) / len(response_times)
-        else:
-            average_response_time = None
+        row_data['first_response_time'] = first_response_time
+        row_data['average_response_time'] = average_response_time
 
-        # Write to CSV
-        row_data = {
-            'ticket_id': ticket_id,
-            'date': date,
-            'labels': ', '.join(labels),
-            'ticket_description': context_text,
-            'assigned_agent_name': assigned_agent_name,
-            'first_response_time': first_response_time,
-            'average_response_time': average_response_time,
-            **replies  # This handles all replies dynamically
-        }
         writer.writerow(row_data)
+
     return output.getvalue()
+
 
 def main():
     st.title("Support Ticket Downloader")
