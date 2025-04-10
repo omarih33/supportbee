@@ -143,15 +143,16 @@ def create_csv(tickets):
         average_response_time = sum(response_times) / len(response_times) if response_times else None
 
         row_data = {
-            'ticket_id': ticket_id,
-            'date': date,
-            'labels': labels_str,
-            'ticket_description': ticket_description,
-            'assigned_agent_name': assigned_agent_name,
-            'first_response_time': first_response_time,
-            'average_response_time': average_response_time,
-            'replies': combined_replies
-        }
+    'ticket_id': ticket_id,
+    'date': date,
+    'labels': labels_str,
+    'ticket_description': ticket_description,
+    'assigned_agent_name': assigned_agent_name,
+    'first_response_time': first_response_time,
+    'average_response_time': average_response_time,
+    'replies': combined_replies,
+    'raw': json.dumps(ticket)[:1000]  # Optional: limit for CSV size
+}
         writer.writerow(row_data)
     
     return output.getvalue()
