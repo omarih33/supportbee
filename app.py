@@ -20,37 +20,50 @@ HEADERS = {
     "Accept": "application/json",
 }
 
-def fetch_all_tickets(start_date, end_date):
+def fetch_all_tickets_all_statuses(start_date, end_date):
     all_tickets = []
-    page = 1
-    while True:
-        # Include assigned_user=any so that tickets assigned to any agent are included.
-        # Also, set archived=true to retrieve archived tickets.
-        url = (
-            f"{BASE_URL}/tickets"
-            f"?auth_token={API_TOKEN}"
-            f"&since={start_date}"
-            f"&until={end_date}"
-            f"&page={page}"
-            f"&assigned_user=any"
-            f"&archived=true"
-            f"&spam=true&trash=true"
-            f"&sort_by=last_activity"
-        )
-        response = requests.get(url, headers=HEADERS)
-        
-        if response.status_code != 200:
-            st.error(f"Error fetching tickets (page {page}): {response.status_code}")
-            st.write(response.text)
-            break
-        
-        data = response.json()
-        tickets = data.get("tickets", [])
-        if not tickets:
-            break
-        all_tickets.extend(tickets)
-        page += 1
+
+    filters = [
+        {"label": "active", "params": "&archived=false&spam=false&trash=false"},
+        {"label": "archived", "params": "&archived=true"},
+        {"label": "spam", "params": "&spam=true&trash=false"},
+        {"label": "trash", "params": "&trash=true&spam=false"},
+    ]
+
+    for f in filters:
+        label = f["label"]
+        page = 1
+        while True:
+            url = (
+                f"{BASE_URL}/tickets"
+                f"?auth_token={API_TOKEN}"
+                f"&since={start_date}"
+                f"&until={end_date}"
+                f"&page={page}"
+                f"{f['params']}"
+                f"&per_page=100"
+                f"&sort_by=last_activity"
+            )
+            response = requests.get(url, headers=HEADERS)
+            if response.status_code != 200:
+                st.error(f"Error fetching {label} tickets (page {page}): {response.status_code}")
+                st.write(response.text)
+                break
+
+            data = response.json()
+            tickets = data.get("tickets", [])
+            if not tickets:
+                break
+
+            # Add status label to each ticket
+            for t in tickets:
+                t["status"] = label
+
+            all_tickets.extend(tickets)
+            page += 1
+
     return all_tickets
+
 
 def fetch_replies(ticket_id):
     url = f"{BASE_URL}/tickets/{ticket_id}/replies?auth_token={API_TOKEN}"
