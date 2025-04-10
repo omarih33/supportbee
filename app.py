@@ -34,7 +34,7 @@ def fetch_all_tickets(start_date, end_date):
             f"&page={page}"
             f"&assigned_user=any"
             f"&archived=true"
-            f"&spam=false&trash=false"
+            f"&spam=true&trash=true"
             f"&sort_by=last_activity"
         )
         response = requests.get(url, headers=HEADERS)
