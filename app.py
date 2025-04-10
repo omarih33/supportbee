@@ -180,7 +180,7 @@ def main():
 
     if st.button("Fetch and Download Tickets"):
         with st.spinner("Fetching tickets..."):
-            tickets = fetch_all_tickets(start_date_str, end_date_str)
+            tickets = fetch_all_tickets_all_statuses(start_date_str, end_date_str)
             if not tickets:
                 st.warning("No tickets found for the selected date range.")
                 return
