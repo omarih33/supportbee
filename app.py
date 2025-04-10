@@ -74,9 +74,10 @@ def safe_get(dictionary, keys, default=''):
 def create_csv(tickets):
     output = io.StringIO()
     fieldnames = [
-        'ticket_id', 'date', 'labels', 'ticket_description',
-        'assigned_agent_name', 'first_response_time', 'average_response_time', 'replies'
-    ]
+    'ticket_id', 'date', 'labels', 'ticket_description',
+    'assigned_agent_name', 'first_response_time', 'average_response_time',
+    'replies', 'raw'  # <- add this
+]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
 
