@@ -7,14 +7,14 @@ import os
 from dateutil import parser
 import io
 
-# Replace these with your own values or set them as environment variables
+# Replace these with your own values or set them as environment variables.
 SUBDOMAIN = os.getenv("SUPPORTBEE_SUBDOMAIN", "YOUR_SUBDOMAIN")
 API_TOKEN = os.getenv("SUPPORTBEE_API_TOKEN", "YOUR_API_TOKEN")
 
 # API base URL
 BASE_URL = f"https://{SUBDOMAIN}.supportbee.com"
 
-# Headers for API requests
+# Headers for API requests.
 HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -24,13 +24,15 @@ def fetch_all_tickets(start_date, end_date):
     all_tickets = []
     page = 1
     while True:
-        # Added archived=true along with spam=false & trash=false to fetch archived tickets only
+        # Include assigned_user=any so that tickets assigned to any agent are included.
+        # Also, set archived=true to retrieve archived tickets.
         url = (
             f"{BASE_URL}/tickets"
             f"?auth_token={API_TOKEN}"
             f"&since={start_date}"
             f"&until={end_date}"
             f"&page={page}"
+            f"&assigned_user=any"
             f"&archived=true"
             f"&spam=false&trash=false"
             f"&sort_by=last_activity"
@@ -38,7 +40,7 @@ def fetch_all_tickets(start_date, end_date):
         response = requests.get(url, headers=HEADERS)
         
         if response.status_code != 200:
-            st.error(f"Error fetching tickets: {response.status_code}")
+            st.error(f"Error fetching tickets (page {page}): {response.status_code}")
             st.write(response.text)
             break
         
@@ -75,47 +77,68 @@ def create_csv(tickets):
         'ticket_id', 'date', 'labels', 'ticket_description',
         'assigned_agent_name', 'first_response_time', 'average_response_time', 'replies'
     ]
-
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
 
     for ticket in tickets:
         ticket_id = ticket.get('id', 'N/A')
         date_str = ticket.get('last_activity_at', '')
-        # Convert date using a fixed format if available
-        date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ').strftime('%m-%d-%Y') if date_str else 'N/A'
+        try:
+            date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ').strftime('%m-%d-%Y') if date_str else 'N/A'
+        except Exception:
+            date = parser.parse(date_str).strftime('%m-%d-%Y') if date_str else 'N/A'
+        
         labels = [label.get('name', '') for label in ticket.get('labels', [])]
         labels_str = ', '.join(labels)
         ticket_description = safe_get(ticket, ['content', 'text'], default='No description')
-        # Note: The API doc uses the key "current_user_asignee" (without the extra "s")
-        assigned_agent_name = safe_get(ticket, ['current_user_asignee', 'name'], default='Unassigned')
+        
+        # First try the 'current_user_asignee' key;
+        # if that's missing, fall back to 'current_team_asignee' (or display "Unassigned")
+        assigned_agent_name = safe_get(ticket, ['current_user_asignee', 'name'], default='')
+        if not assigned_agent_name:
+            assigned_agent_name = safe_get(ticket, ['current_team_asignee', 'name'], default='Unassigned')
+        
         replies = ticket.get('replies', [])
         all_replies = []
-
+        # Build a combined string of replies and check agent info.
         for reply in sorted(replies, key=lambda x: x.get('created_at', '')):
-            reply_type = 'Agent' if reply.get('agent') else 'Customer'
+            is_agent = False
+            # Check top-level 'agent' flag or nested in 'replier'
+            if reply.get('agent'):
+                is_agent = True
+            elif 'replier' in reply and reply['replier']:
+                if reply['replier'].get('agent'):
+                    is_agent = True
+            reply_type = 'Agent' if is_agent else 'Customer'
             reply_text = safe_get(reply, ['content', 'text'], default='')
             all_replies.append(f"{reply_type}: {reply_text}")
-
         combined_replies = "\n".join(all_replies)
+        
+        # Calculate response times (in hours).
         ticket_created_at_str = ticket.get('created_at', '')
         ticket_created_at = parser.parse(ticket_created_at_str) if ticket_created_at_str else None
         first_agent_reply_time = None
         response_times = []
         previous_message_time = ticket_created_at
-
+        
         for reply in sorted(replies, key=lambda x: x.get('created_at', '')):
             reply_created_at_str = reply.get('created_at', '')
             reply_created_at = parser.parse(reply_created_at_str) if reply_created_at_str else None
-
+            
             if reply_created_at and previous_message_time:
                 time_diff = (reply_created_at - previous_message_time).total_seconds() / 3600
+                is_agent = False
                 if reply.get('agent'):
+                    is_agent = True
+                elif 'replier' in reply and reply['replier']:
+                    if reply['replier'].get('agent'):
+                        is_agent = True
+                if is_agent:
                     response_times.append(time_diff)
                     if not first_agent_reply_time:
                         first_agent_reply_time = reply_created_at
                 previous_message_time = reply_created_at
-
+        
         first_response_time = (first_agent_reply_time - ticket_created_at).total_seconds() / 3600 if ticket_created_at and first_agent_reply_time else None
         average_response_time = sum(response_times) / len(response_times) if response_times else None
 
@@ -130,7 +153,7 @@ def create_csv(tickets):
             'replies': combined_replies
         }
         writer.writerow(row_data)
-
+    
     return output.getvalue()
 
 def main():
@@ -148,12 +171,12 @@ def main():
                 return
 
             for ticket in tickets:
-                ticket_id = ticket["id"]
+                ticket_id = ticket.get("id")
                 replies = fetch_replies(ticket_id)
                 ticket["replies"] = replies
 
             csv_content = create_csv(tickets)
-            csv_bytes = csv_content.encode('utf-8')  # Convert to bytes for download
+            csv_bytes = csv_content.encode('utf-8')
             
             st.success(f"Fetched {len(tickets)} tickets.")
             st.download_button(
