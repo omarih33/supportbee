@@ -24,12 +24,15 @@ def fetch_all_tickets(start_date, end_date):
     all_tickets = []
     page = 1
     while True:
+        # Added archived=true along with spam=false & trash=false to fetch archived tickets only
         url = (
             f"{BASE_URL}/tickets"
             f"?auth_token={API_TOKEN}"
             f"&since={start_date}"
             f"&until={end_date}"
             f"&page={page}"
+            f"&archived=true"
+            f"&spam=false&trash=false"
             f"&sort_by=last_activity"
         )
         response = requests.get(url, headers=HEADERS)
@@ -79,11 +82,13 @@ def create_csv(tickets):
     for ticket in tickets:
         ticket_id = ticket.get('id', 'N/A')
         date_str = ticket.get('last_activity_at', '')
+        # Convert date using a fixed format if available
         date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ').strftime('%m-%d-%Y') if date_str else 'N/A'
         labels = [label.get('name', '') for label in ticket.get('labels', [])]
         labels_str = ', '.join(labels)
         ticket_description = safe_get(ticket, ['content', 'text'], default='No description')
-        assigned_agent_name = safe_get(ticket, ['current_user_assignee', 'name'], default='Unassigned')
+        # Note: The API doc uses the key "current_user_asignee" (without the extra "s")
+        assigned_agent_name = safe_get(ticket, ['current_user_asignee', 'name'], default='Unassigned')
         replies = ticket.get('replies', [])
         all_replies = []
 
